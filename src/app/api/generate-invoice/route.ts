@@ -12,7 +12,12 @@ type InvoiceItem = {
   quantity: number;
   unitPrice: number;
 };
-
+type ChromiumShim = {
+  args: string[];
+  executablePath: string | (() => Promise<string>);
+  headless?: boolean;
+  defaultViewport?: { width: number; height: number } | null;
+};
 // Load Puppeteer and Chromium depending on environment
 async function loadPuppeteer() {
   if (puppeteer) return;
@@ -134,13 +139,17 @@ ${items.map(item => `<tr>
     let browser;
     if (isProd) {
       // Vercel: use sparticuz chromium
-      const chromiumShim = chromium as any;
+      const chromiumShim = chromium as unknown as ChromiumShim ;
       browser = await puppeteer!.launch({
-        args: chromiumShim.args,
-        executablePath: await chromiumShim.executablePath(),
-        headless: true,
-        defaultViewport: chromiumShim.defaultViewport || { width: 1280, height: 800 },
-      });
+  args: chromiumShim.args,
+  executablePath:
+    typeof chromiumShim.executablePath === "function"
+      ? await chromiumShim.executablePath()
+      : chromiumShim.executablePath,
+  headless: chromiumShim.headless ?? true,
+  defaultViewport: chromiumShim.defaultViewport ?? { width: 1280, height: 800 },
+});
+
     } else {
       // Local Windows: use puppeteer bundled Chromium
       browser = await puppeteer!.launch({ headless: true });
