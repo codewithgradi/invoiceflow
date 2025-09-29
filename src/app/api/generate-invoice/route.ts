@@ -1,44 +1,18 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-
-const isProd = process.env.VERCEL === "1";
-
-let puppeteer: typeof import("puppeteer-core") | typeof import("puppeteer");
-let chromium: typeof import("@sparticuz/chromium") | undefined;
+import puppeteer from "puppeteer";
 
 type InvoiceItem = {
   description: string;
   quantity: number;
   unitPrice: number;
 };
-type ChromiumShim = {
-  args: string[];
-  executablePath: string | (() => Promise<string>);
-  headless?: boolean;
-  defaultViewport?: { width: number; height: number } | null;
-};
-// Load Puppeteer and Chromium depending on environment
-async function loadPuppeteer() {
-  if (puppeteer) return;
-
-  if (isProd) {
-    const pMod = await import("puppeteer-core");
-    puppeteer = pMod;
-    const cMod = await import("@sparticuz/chromium");
-    chromium = cMod;
-  } else {
-    const pMod = await import("puppeteer");
-    puppeteer = pMod;
-  }
-}
 
 export const config = { api: { bodyParser: false } };
 
 export async function POST(req: Request) {
   try {
-    await loadPuppeteer();
-
     const formData = await req.formData();
     const companyName = formData.get("companyName")?.toString() || "";
     const companyAddress = formData.get("companyAddress")?.toString() || "";
@@ -49,22 +23,20 @@ export async function POST(req: Request) {
     const items: InvoiceItem[] = JSON.parse(formData.get("items")?.toString() || "[]");
     const taxRate = parseFloat(formData.get("taxRate")?.toString() || "0");
 
-    // Handle logo
+    // Logo
     let logoBase64 = "";
     const logoFile = formData.get("logo") as File | null;
     if (logoFile) {
       const buffer = Buffer.from(await logoFile.arrayBuffer());
-      const mimeType = logoFile.type || "image/png";
-      logoBase64 = `data:${mimeType};base64,${buffer.toString("base64")}`;
+      logoBase64 = `data:${logoFile.type || "image/png"};base64,${buffer.toString("base64")}`;
     }
 
-    const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const subtotal = items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
     const taxAmount = subtotal * (taxRate / 100);
     const total = subtotal + taxAmount;
     const invoiceNumber = Date.now().toString();
 
-    // HTML template (same as your previous one)
-    const htmlTemplate = `<!DOCTYPE html>
+        const htmlTemplate = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -135,42 +107,19 @@ ${items.map(item => `<tr>
 </body>
 </html>`;
 
-    // Launch Puppeteer
-    let browser;
-    if (isProd) {
-      // Vercel: use sparticuz chromium
-      const chromiumShim = chromium as unknown as ChromiumShim ;
-      browser = await puppeteer!.launch({
-  args: chromiumShim.args,
-  executablePath:
-    typeof chromiumShim.executablePath === "function"
-      ? await chromiumShim.executablePath()
-      : chromiumShim.executablePath,
-  headless: chromiumShim.headless ?? true,
-  defaultViewport: chromiumShim.defaultViewport ?? { width: 1280, height: 800 },
-});
 
-    } else {
-      // Local Windows: use puppeteer bundled Chromium
-      browser = await puppeteer!.launch({ headless: true });
-    }
-
+    // Puppeteer: bundled Chromium works anywhere
+    const browser = await puppeteer.launch({ headless: true });
     const page = await browser.newPage();
-    await page.setViewport({ width: 1280, height: 800 });
     await page.setContent(htmlTemplate, { waitUntil: "networkidle0" });
-
     const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
     await browser.close();
 
-    // Save PDF temporarily in invoices folder
     const invoicesDir = path.join(process.cwd(), "public", "invoices");
     if (!fs.existsSync(invoicesDir)) fs.mkdirSync(invoicesDir, { recursive: true });
-
     const fileName = `invoice_${invoiceNumber}.pdf`;
-    const filePath = path.join(invoicesDir, fileName);
-    fs.writeFileSync(filePath, pdfBuffer);
+    fs.writeFileSync(path.join(invoicesDir, fileName), pdfBuffer);
 
-    // Return URL
     return NextResponse.json({ pdfUrl: `/invoices/${fileName}` });
   } catch (err) {
     console.error("PDF generation error:", err);
