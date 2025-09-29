@@ -109,7 +109,7 @@ ${items.map(item => `<tr>
 
 
     // Puppeteer: bundled Chromium works anywhere
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await puppeteer.launch({executablePath:'/usr/bin/chromium', headless: true });
     const page = await browser.newPage();
     await page.setContent(htmlTemplate, { waitUntil: "networkidle0" });
     const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
